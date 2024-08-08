@@ -6,9 +6,7 @@ import (
 	"compress/flate"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -47,7 +45,7 @@ func (p *PartialZip) init() error {
 	resp, _ := client.Do(req)
 	p.Size = resp.ContentLength
 
-	for offset < 0 && chuck < (1000 * 1024) {
+	for offset < 0 && chuck < (1000*1024) {
 		//increase until we have enough to hold in the offset
 		chuck = 10 * chuck
 
@@ -57,7 +55,7 @@ func (p *PartialZip) init() error {
 		req.Header.Add("Range", reqRange)
 		resp, _ = client.Do(req)
 
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return errors.Wrap(err, "failed to read http response body")
 		}
@@ -140,7 +138,7 @@ func (p *PartialZip) Get(path string) (io.ReadCloser, error) {
 			req.Header.Add("Range", reqRange)
 			resp, _ := client.Do(req)
 
-			body, err := ioutil.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to read http response body")
 			}
@@ -158,12 +156,11 @@ func (p *PartialZip) Get(path string) (io.ReadCloser, error) {
 }
 
 // Download downloads a file from the remote zip.
-// It returns the number of bytes written and an error, if any.
-func (p *PartialZip) Download(path string) (int, error) {
+// It returns a slice of bytes and an error, if any.
+func (p *PartialZip) Download(path string) ([]byte, error) {
 
 	var client http.Client
 	var padding uint64 = 1024
-	var n int
 
 	for _, file := range p.Files {
 		// find path in zip directory
@@ -174,31 +171,24 @@ func (p *PartialZip) Download(path string) (int, error) {
 			req.Header.Add("Range", reqRange)
 			resp, _ := client.Do(req)
 
-			body, err := ioutil.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				return n, errors.Wrap(err, "failed to read http response body")
+				return nil, errors.Wrap(err, "failed to read http response body")
 			}
 
 			dataOffset, err := findBodyOffset(bytes.NewReader(body))
 			if err != nil {
-				return n, errors.Wrap(err, "failed to find data start offset in zip file header")
+				return nil, errors.Wrap(err, "failed to find data start offset in zip file header")
 			}
 
-			enflated, err := ioutil.ReadAll(flate.NewReader(bytes.NewReader(body[dataOffset : uint64(len(body))-padding+dataOffset])))
+			enflated, err := io.ReadAll(flate.NewReader(bytes.NewReader(body[dataOffset : uint64(len(body))-padding+dataOffset])))
 			if err != nil {
-				return n, errors.Wrap(err, "failed to flate decompress data")
+				return nil, errors.Wrap(err, "failed to flate decompress data")
 			}
 
-			of, err := os.Create(path)
-			defer of.Close()
-
-			n, err = of.Write(enflated)
-			if err != nil {
-				return n, errors.Wrap(err, "failed to write decompressed data to file")
-			}
-			return n, nil
+			return enflated, nil
 		}
 	}
 
-	return n, fmt.Errorf("path %s does not exist in remote zip", path)
+	return nil, fmt.Errorf("path %s does not exist in remote zip", path)
 }
